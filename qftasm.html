@@ -1,0 +1,161 @@
+<!DOCTYPE html PUBLIC "-//W3C//Dli XHTML 1.1//EN"
+"http://www.w3.org/TR/xhtml11/Dli/xhtml11.dli">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+	<head>
+		<meta http-equiv="Content-type" content="text/html;charset=UTF-8" />
+		<title>QFTASM Interpreter</title>
+		
+		{% load staticfiles %}
+		<style>
+			input { margin: 5px; }
+            textarea { width: 100%; height: 20em; }
+            th { border: 2px solid black; padding: 3px; text-align: center; }
+            table { border-collapse: collapse; font-family: monospace; text-align: right; margin: 10px; }
+            td.asm { text-align: left; }
+            tr.highlight > td { background-color: #FF8; }
+            tr.highlight2 > td { background-color: #FFA; }
+		</style>
+	</head>
+	
+	<body style="margin-left: 20px">
+	
+		<h1>QFTASM Interpreter</h1>
+		<p id="desc">An interpreter for QFTASM (Quest For Tetris Assembly).</p>
+        
+        <textarea id="asm-code">0. MLZ -1 3 3;
+1. MLZ -1 7 6; preloadCallStack
+2. MLZ -1 2 1; beginDoWhile0_infinite_loop
+3. MLZ -1 1 4; beginDoWhile1_trials
+4. ADD A4 2 4;
+5. MLZ -1 A3 5; beginDoWhile2_repeated_subtraction
+6. SUB A5 A4 5;
+7. SUB 0 A5 2;
+8. MLZ A2 5 0;
+9. MLZ 0 0 0; endDoWhile2_repeated_subtraction
+10. MLZ A5 3 0;
+11. MLZ 0 0 0; endDoWhile1_trials
+12. SUB A4 A3 2;
+13. MNZ A2 15 0; beginIf3_prime_found
+14. MLZ 0 0 0;
+15. MLZ -1 A3 1; endIf3_prime_found
+16. ADD A3 2 3;
+17. MLZ -1 3 0; 
+18. MLZ -1 1 4; endDoWhile0_infinite_loop</textarea>
+
+        <p>
+            <button id="set-code" onclick="set_code()">Set code</button> | 
+            <button id="run-code" onclick="run_code()" disabled>Run</button>
+            <!-- <button id="stop-code" onclick="stop_code()" disabled hidden>Stop</button> -->
+            <button id="step-code" onclick="step_code()" disabled>Step</button>
+            <button id="slow-code" onclick="slow_code()" disabled>Slow</button> &ndash;
+            Ticks per sec: <input type="number" id="tps" value="5" min="1" max="100"/>;
+            Millisecs per tick: <input type="number" id="mspt" value="200" min="10" max="1000"/>
+        </p>
+        
+        <hr/>
+        
+        <p id="error" style="color: red;"></p>
+        <p style="clear: both">Program counter: <span id="pc">0</span>; step number: <span id="stepnum">0</span></p>
+        
+        <table id="machine-code" style="float: left">
+            <tr>
+                <th colspan=2 rowspan=2>ASM</th>
+                <th colspan=2 rowspan=2>Opcode</th>
+                <th colspan=2>Address 1</th>
+                <th colspan=2>Address 2</th>
+                <th colspan=2>Address 3</th>
+            </tr>
+            <tr>
+                <th>Type</th>
+                <th>Location</th>
+                <th>Type</th>
+                <th>Location</th>
+                <th>Type</th>
+                <th>Location</th>
+            </tr>
+        </table>
+        
+        <table id="ram-bank" style="float: left">
+            <tr>
+                <th>Address (decimal)</th>
+                <th>Address (binary)</th>
+                <th>Data (decimal)</th>
+                <th>Data (binary)</th>
+                <th>Reads</th>
+                <th>Writes</th>
+            </tr>
+        </table>
+        
+        <div style="clear:both;"></div>
+        
+        <p style="margin-bottom: 0px;">
+            <fieldset id="breakpoints">
+                <legend>Breakpoints</legend>
+                Instruction: <input type="text" id="breakpoints-inst" onchange="set_breakpoints('inst')"/> <br/>
+                RAM read: <input type="text" id="breakpoints-read" onchange="set_breakpoints('read')"/> <br/>
+                RAM write: <input type="text" id="breakpoints-write" onchange="set_breakpoints('write')"/>
+            </fieldset>
+            
+            Direct write to RAM &ndash; value: <input type="text" id="directWriteVal"/>, address: <input type="text" id="directWriteAddr"/>
+            <input type="checkbox" id="breakOnBlank"/><label for="breakOnBlank">Stop when value is empty</label> <br/>
+            RAM addresses to display: <input type="text" id="RAMdisplay" onchange="set_RAMdisplay()"/> <br/><br/>
+            
+            <strong>RAM Display:</strong>
+        </p>
+        
+        <svg id="display" style="border: 1px solid black" width="340px" height="20"></svg>
+        
+        <hr/>
+        
+        <h2>Documentation</h2>
+        
+        <p>
+            QFTASM is a very simple version of Assembly developed for the <a href="http://blog.phinotpi.com/2016/05/30/the-quest-for-tetris/">Quest For Tetris</a> project. To use this interpreter, put your code in the text box and click <kbd>Set code</kbd> to enable the flow control buttons. <kbd>Run</kbd> will execute the instructions as quickly as possible, <kbd>Step</kbd> will execute one instruction at a time, and <kbd>Slow</kbd> will execute instructions at a user-defined rate.
+            <br/><br/>
+            Each instruction should be formatted like this: <code>[number]: [INST] [arg1] [arg2] [arg3]</code>. Optional comments are also allowed, and are denoted by a semicolon. Here is a list of instructions along with their arguments:
+            
+            <ul>
+                <li><code>MNZ [test] [value] [dest]</code> &ndash; Move if not zero; sets <code>[dest]</code> to <code>[value]</code> if <code>[test]</code> is not zero.</li>
+                <li><code>MLZ [test] [value] [dest]</code> &ndash; Move if less than zero; sets <code>[dest]</code> to <code>[value]</code> if <code>[test]</code> is less than zero.</li>
+                <li><code>ADD [val1] [val2] [dest]</code> &ndash; Add; adds <code>[val1]</code> to <code>[val2]</code> and stores the result in <code>[dest]</code>.</li>
+                <li><code>SUB [val1] [val2] [dest]</code> &ndash; Subtract; subtracts <code>[val2]</code> from <code>[val1]</code> and stores the result in <code>[dest]</code>.</li>
+                <li><code>AND [val1] [val2] [dest]</code> &ndash; Bitwise AND; bitwise ANDs together <code>[val1]</code> and <code>[val2]</code> and stores the result in <code>[dest]</code>.</li>
+                <li><code>OR [val1] [val2] [dest]</code> &ndash; Bitwise OR; bitwise ORs together <code>[val1]</code> and <code>[val2]</code> and stores the result in <code>[dest]</code>.</li>
+                <li><code>XOR [val1] [val2] [dest]</code> &ndash; Bitwise XOR; bitwise XORs together <code>[val1]</code> and <code>[val2]</code> and stores the result in <code>[dest]</code>.</li>
+                <li><code>ANT [val1] [val2] [dest]</code> &ndash; Bitwise AND-NOT; bitwise ANDs together <code>[val1]</code> and (NOT <code>[val2]</code>) and stores the result in <code>[dest]</code>.</li>
+                <li><code>SL [val1] [val2] [dest]</code> &ndash; Shift left; shifts <code>[val1]</code> left by <code>[val2]</code> bits and stores the result in <code>[dest]</code>.</li>
+                <li><code>SRL [val1] [val2] [dest]</code> &ndash; Shift right (logical); shifts <code>[val1]</code> right by <code>[val2]</code> bits and stores the result in <code>[dest]</code>. Doesn't preserve sign.</li>
+                <li><code>SRA [val1] [val2] [dest]</code> &ndash; Shift right (arithmetic); shifts <code>[val1]</code> right by <code>[val2]</code> bits and stores the result in <code>[dest]</code>, while preserving sign.</li>
+            </ul>
+            
+            There are two formats for arguments: literal integers and references. Integers may either positive or negative, with the negative ones converted to two's complement (for example, -37 becomes 65573), and they are limited to the range 0&ndash;65535 (16 bits). For references, the number of dereferences is notated by one of <code>A, B, C</code>. For instance, <code>A37</code> will be replaced with the data in address 37 at execution time. <code>B37</code> will be replaced with the data in the address given by the data in address 37, and likewise, with one more level, for <code>C37</code>.
+            
+            <br/><br/>
+            
+            The first table shows the instructions and their machine code equivalents. In the <strong>ASM</strong> column is the code exactly as it appears in the input, sans comment. In the <strong>Opcode</strong> column is the code for that command. <strong>Type</strong> refers to the reference level, so <code>37</code> would have a type of <code>00</code> and <code>A37</code> would have a type of <code>01</code>. Finally, <strong>Location</strong> is just the value or address. Also, the highlights show the next two instructions to be executed.
+            
+            <br/><br/>
+            
+            The second table shows the RAM bank, and I think the columns are pretty self-explanatory. More RAM slots are added as needed (when an instruction reads from or writes to an address outside of the current range).
+            
+            <br/><br/>
+            
+            The three text boxes directly below can be used to set breakpoints. Simply enter addresses separated by commas and/or spaces. Any of the following will work: '<code>1,2,3</code>', '<code>1, 2, 3</code>', '<code>1 2 3</code>'.
+            
+            <br/><br/>
+            
+            Regarding the direct write to RAM line, that address will be set to that value when that address is read. Once that address is set, then the value box is blanked. Further reads of the same address will not do anything if the value box is blank. The accompanying checkbox is self-explanatory, with the caveat that if a value is entered and then the user resumes the interpreter, that address will be set to that value the <em>next</em> time it is read.
+            
+            <br/><br/>
+            
+            For specifying which addresses to display, the format should be something like <code>0 2-4 6</code>. Ranges of numbers are denoted by <code>a-b</code> (inclusive), with no spaces on either side of the dash. Separate numbers and ranges by commas and/or spaces.
+        </p>
+		
+	
+		<script src="https://code.jquery.com/jquery-1.10.2.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.6/d3.min.js" charset="utf-8"></script>
+		<script src="{% static 'd3applets/qftasm.js' %}"></script>
+		
+	</body>
+</html>
