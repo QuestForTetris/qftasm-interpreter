@@ -1,5 +1,5 @@
 var program = [];
-var PC = [0,1];
+var PC = [0, 0];
 var stepnum = 0;
 var RAM = [];
 var bps_read = [];
@@ -19,15 +19,15 @@ function addRAMslots(addr) {
     }
 }
 
-function RAMwrite(addr, val) {
+function RAMwrite(addr, val, inc = 1) {
     addRAMslots(addr);
     
     if (val < 0) { val = (65535^-val)+1; }
     val = val & 65535; //16-bit words
-    if (addr === 0) { PC[1] = val + 1; }
+    if (addr === 0) { PC[1] = val; }
     
     RAM[addr][0] = val;
-    RAM[addr][2]++;
+    RAM[addr][2] += inc;
     var row = $('#ram-bank tr')[addr+1].children;
     $(row[2]).text(val);
     $(row[3]).text(bin(val));
@@ -84,7 +84,7 @@ function set_code() {
     var lines = code.split("\n");
     new_program = [];
     
-    PC = [0, 1];
+    PC = [0, 0];
     stepnum = 0;
     RAM = [];
     inst_break = 0;
@@ -164,7 +164,7 @@ function step_code() {
     
     $('#stepnum').text(stepnum);
     $($('#machine-code tr')[PC[0]+2]).removeClass('highlight');
-    $($('#machine-code tr')[PC[1]+2]).removeClass('highlight2');
+    $($('#machine-code tr')[PC[1]+3]).removeClass('highlight2');
     
     for (var i=0; i<3; i++) {
         var val = inst["add"+(i+1)+"_loc"];
@@ -176,15 +176,15 @@ function step_code() {
         vals.push(val);
     }
     
+    PC[1] = PC[1] + 1;
     PC[0] = PC[1];
-    PC[1] = PC[0]+1;
-    if(RAMdisplay.indexOf(0) >= 0){ update_display(0); }
+    RAMwrite(0, PC[1], 0);
     
     window[inst["opname"]](vals[0], vals[1], vals[2]);
     
     $('#pc').text(PC[0]);
     $($('#machine-code tr')[PC[0]+2]).addClass('highlight');
-    $($('#machine-code tr')[PC[1]+2]).addClass('highlight2');
+    $($('#machine-code tr')[PC[1]+3]).addClass('highlight2');
 }
 
 var code_timer;
