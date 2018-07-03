@@ -82,7 +82,7 @@ function SND(bus, val, dest) {
     var bus = busses[bus]; 
 
     if (bus !== undefined) { 
-        RAMwrite(dest, bus[0].write(val));
+        RAMwrite(dest, bus[0].write(String.fromCharCode(val)));
     } else {
         RAMwrite(dest, 0);
     }
@@ -402,7 +402,7 @@ function console_bus(control) {
             this.prev_input = false;
         }
 
-        this.output.append(String.fromCharCode(val));
+        this.output.append(val);
 
         return 1;
     };
@@ -442,7 +442,11 @@ function websocket_bus(control) {
                 this.send_buffer.forEach(this.ws.send);
             }.bind(this);
 
-            this.ws.onmessage = this.buffer.push;
+            this.ws.onmessage = function(msg) {
+                for (var i = 0; i < msg.data.length; i++) {
+                    this.buffer.push(msg.data.charCodeAt(i));
+                }
+            }.bind(this);
         }
     };
 
