@@ -8,6 +8,9 @@ var bps_inst = [];
 var inst_break = 0;
 var RAMdisplay = [];
 
+var busses = [];
+var reinit_busses = true;
+
 function bin(x) {
     return x >= 0 ? ("0000000000000000"+x.toString(2)).slice(-16) : ("1111111111111111"+((65535^-x)+1).toString(2)).slice(-16);
 }
@@ -75,11 +78,38 @@ function SL(val1, val2, dest){ RAMwrite(dest, val1<<val2); }
 function SRL(val1, val2, dest){ RAMwrite(dest, (val1&65535)>>val2); }
 function SRA(val1, val2, dest){ RAMwrite(dest, ((val1&65535)>>val2) + ((val1&65535) >= 32768 ? ((1<<val2)-1)<<(16-val2) : 0)); }
 
-var opnames = ["MNZ","MLZ","ADD","SUB","AND","OR","XOR","ANT","SL","SRL","SRA"];
+function SND(bus, val, dest) { 
+    var bus = busses[bus]; 
+
+    if (bus !== undefined) { 
+        RAMwrite(dest, bus[0].write(String.fromCharCode(val)));
+    } else {
+        RAMwrite(dest, 0);
+    }
+}
+
+function RCV(bus, jump, dest) {
+    var bus = busses[bus];
+
+    if (bus !== undefined) {
+        var val = bus[0].buffer.shift();
+
+        if (val !== undefined) {
+            RAMwrite(dest, val);
+            return;
+        }
+    }
+
+    RAMwrite(0, jump);
+}
+
+var opnames = ["MNZ","MLZ","ADD","SUB","AND","OR","XOR","ANT","SL","SRL","SRA","SND","RCV"];
 
 $(document).ready(function(){ set_code(); });
 
 function set_code() {
+    stop_code();
+
     var code = $('#asm-code').val();
     var lines = code.split("\n");
     new_program = [];
@@ -157,6 +187,14 @@ function step_code() {
             inst_break -= 1;
         }
     }
+
+    if (reinit_busses) {
+        busses.forEach(function(x) {
+            x[0].init();
+        });
+
+        reinit_busses = false;
+    }
     
     stepnum++;
     var inst = program[PC[0]];
@@ -188,21 +226,30 @@ function step_code() {
 }
 
 var code_timer;
-function run_code(){
-    if (!code_timer){
+
+function run_code() {
+    if (!code_timer) {
         code_timer = setInterval(step_code, 1);
         $('#run-code').html("Stop");
     } else {
         stop_code();
     }
 }
-function stop_code(){
+
+function stop_code() {
     clearInterval(code_timer);
     code_timer = 0;
     $('#run-code').html("Run");
     $('#slow-code').html("Slow");
+
+    busses.forEach(function(x) {
+        x[0].close();
+    });
+
+    reinit_busses = true;
 }
-function slow_code(){
+
+function slow_code() {
     if (!code_timer){
         code_timer = setInterval(step_code, $('#mspt').val());
         $('#slow-code').html("Stop");
@@ -297,4 +344,164 @@ function update_display(addr){
         row.select('.rect'+j)
           .attr('fill',val & (1 << (15-j)) ? '#000' : '#FFF');
     }
+}
+
+function null_bus(_) {
+    this.buffer = [];
+
+    this.write = function(_) { return 0; };
+    this.init = function() {};
+    this.close = function() {};
+}
+
+function console_bus(control) {
+    this.cooked = true;
+    this.output = $("<textarea/>", {style: "width: 100%;", readonly: true});
+
+    this.input = $("<input/>", {style: "width: 100%;", type: "text", keypress: function(event) {
+        if (!this.cooked) {
+            this.buffer.push(event.keyCode);
+
+            if (!this.prev_input) {
+                this.output.append("\n< ");
+            }
+
+            this.output.append(String.fromCharCode(event.keyCode));
+            this.prev_input = true;
+
+            return false;
+        } else if (event.keyCode === 13) {
+            var input = this.input.val();
+            console.log(input);
+
+            for (var i = 0; i < input.length; i++) {
+                this.buffer.push(input.charCodeAt(i));
+            }
+
+            this.buffer.push(13);
+
+            if (!this.prev_input) {
+                this.output.append("\n< ");
+            }
+
+            this.output.append(input);
+            this.output.append("\n");
+
+            this.input.val("");
+            this.prev_input = true;
+
+            return false;
+        } else {
+            return true;
+        }
+    }.bind(this)});
+
+    this.write = function(val) {
+        if (this.prev_input || this.prev_input === null) {
+            this.output.append("\n> ");
+            this.prev_input = false;
+        }
+
+        this.output.append(val);
+
+        return 1;
+    };
+
+    this.init = this.close = function() {
+        this.buffer = [];
+        this.prev_input = null;
+        this.output.append("---");
+    };
+
+    control.append(this.output);
+    control.append(this.input);
+
+    this.cook_control = $("<input>", {type: "checkbox", click: function() { 
+        this.cooked = this.cook_control.is(':checked');
+    }.bind(this)});
+
+    control.append(this.cook_control);
+    control.append("Cooked?")
+}
+
+function websocket_bus(control) {
+    this.ws = null;
+
+    this.ws_host = $("<input/>", {style: "width: 100%;", type: "text", placeholder: "wss://host:port"});
+
+    this.init = function() {
+        this.buffer = [];
+        this.send_buffer = [];
+
+        ws_host = this.ws_host.val();
+
+        if (ws_host) {
+            this.ws = new WebSocket(ws_host);
+
+            this.ws.onopen = function(_) {
+                this.send_buffer.forEach(this.ws.send);
+            }.bind(this);
+
+            this.ws.onmessage = function(msg) {
+                for (var i = 0; i < msg.data.length; i++) {
+                    this.buffer.push(msg.data.charCodeAt(i));
+                }
+            }.bind(this);
+        }
+    };
+
+    this.close = function() {
+        if (this.ws) {
+            this.ws.close();
+        }
+    };
+
+    this.write = function(val) {
+        if (this.ws) {
+            if (this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(val);
+            } else {
+                this.send_buffer.push(val);
+            }
+
+            return 1;
+        }
+
+        return 0;
+    };
+
+    control.append(this.ws_host);
+}
+
+var bus_classes = [
+    ["Disabled", "null_bus"],
+    ["Console", "console_bus"],
+    ["WebSocket", "websocket_bus"],
+];
+
+function add_bus() {
+    var row = $("<tr/>");
+    var display = $("<div/>");
+
+    var bus_ref = "busses[" + busses.length + "]";
+    busses[busses.length] = [new null_bus(), display];
+
+    bus_classes.forEach(function(klass, i) {
+        var radio_button = $("<input type=radio name=bus" + busses.length
+                           + " onchange=\""
+                           + bus_ref + "[0].close();"
+                           + bus_ref + "[1].empty();"
+                           + bus_ref + "[0] = new " + klass[1] + "(" + bus_ref + "[1]);\">"
+                           + klass[0]
+                           + "</input>");
+
+        if (i === 0) radio_button.prop("checked", true);
+
+        row.append(radio_button);
+    });
+
+    row.append($("<br/>"))
+    row.append(display);
+
+    $("#busses").append(row);
 }
